@@ -1,120 +1,110 @@
-assert(hookmetamethod, "Unsupported exploit");
-assert(syn or http, "Unsupported exploit");
+local config = {
+  spaces = 4
+};
 
-if getgenv().HttpSpy then
-  return warn("HTTP(s) Spy already loaded. Run getgenv().HttpSpy:Destroy() to destroy the thread.");
+local format   = string.format;
+local rep      = string.rep;
+local Type     = type;
+local Pairs    = pairs;
+local gsub     = string.gsub;
+local Tostring = tostring;
+local concat   = table.concat;
+local Tab      = rep(" ", config.spaces or 4);
+
+local Serialize;
+local function formatIndex(idx, scope)
+  local indexType = Type(idx);
+  local finishedFormat = idx;
+  if indexType == "string" then
+    finishedFormat = format("\27[32m\"%s\"\27[0m", idx); 
+  elseif indexType == "table" then
+    scope = scope + 1;
+    finishedFormat = Serialize(idx, scope);
+  elseif indexType == "number" then
+    finishedFormat = format("\27[33m%s\27[0m", idx);
+  end;
+  return format("[%s]", finishedFormat);
 end;
 
-local Serialize = loadstring(game:HttpGet("https://raw.githubusercontent.com/78we34y34yh3h433ah322t23tg23wt2g23w4g63/-2t2t2g123311fg3gbewe-g/main/Trob"))();
+local function serializeArgs(tbl) 
+  local Serialized = {}; -- For performance reasons
 
-local __namecall;
-local spyEnabled  = true;
-local gsub        = string.gsub;
-local format      = string.format;
-local getmethod   = getnamecallmethod;
-local externprint = rconsoleprint;
-local httplib     = syn or http;
-local backupSYN   = httplib.request;
-local RBXMethods  = {
-  ["HttpGet"] = true;
-  ["HttpGetAsync"] = true;
-  ["GetObjects"] = true;
-  ["HttpPost"] = true;
-  ["HttpPostAsync"] = true;
+  for i,v in Pairs(tbl) do
+    local valueType = Type(v);
+    local SerializeIndex = #Serialized + 1;
+    if valueType == "string" then
+      Serialized[SerializeIndex] = format("\27[32m\"%s\"\27[0m", v);
+    elseif valueType == "table" then
+      Serialized[SerializeIndex] = Serialize(v, 0);
+    else
+      Serialized[SerializeIndex] = Tostring(v);
+    end;
+  end;
+
+  return concat(Serialized, ", ");
+end;
+
+-- Very scuffed method I know
+
+local function formatString(str) 
+  for i,v in Pairs({ ["\n"] = "\\n", ["\t"] = "\\t", ["\""] = "\\\"" }) do
+    str = gsub(str, i, v);
+  end;
+  return str;
+end;
+
+Serialize = function(tbl, scope) 
+  scope = scope or 0;
+
+  local Serialized = {}; -- For performance reasons
+  local scopeTab = rep(Tab, scope);
+  local scopeTab2 = rep(Tab, scope+1);
+
+  local tblLen = 0;
+  for i,v in Pairs(tbl) do
+    local formattedIndex = formatIndex(i, scope);
+    local valueType = Type(v);
+    local SerializeIndex = #Serialized + 1;
+    if valueType == "string" then -- Could of made it inline but its better to manage types this way.
+      Serialized[SerializeIndex] = format("%s%s = \27[32m\"%s\"\27[0m,\n", scopeTab2, formattedIndex, formatString(v));
+    elseif valueType == "number" or valueType == "boolean" then
+      Serialized[SerializeIndex] = format("%s%s = \27[33m%s\27[0m,\n", scopeTab2, formattedIndex, Tostring(v));
+    elseif valueType == "table" then
+      Serialized[SerializeIndex] = format("%s%s = %s,\n", scopeTab2, formattedIndex, Serialize(v, scope+1));
+    elseif valueType == "userdata" then
+      Serialized[SerializeIndex] = format("%s%s = newproxy(),\n", scopeTab2, formattedIndex);
+    else
+      Serialized[SerializeIndex] = format("%s%s = \"%s\",\n", scopeTab2, formattedIndex, Tostring(valueType)); -- Unsupported types.
+    end;
+    tblLen = tblLen + 1; -- # messes up with nil values
+  end;
+
+  -- Remove last comma
+  local lastValue = Serialized[#Serialized];
+  if lastValue then
+    Serialized[#Serialized] = lastValue:sub(0, -3) .. "\n";
+  end;
+
+  if tblLen > 0 then
+    if scope < 1 then
+      return format("{\n%s}", concat(Serialized));  
+    else
+      return format("{\n%s%s}", concat(Serialized), scopeTab);
+    end;
+  else
+    return "{}";
+  end;
+end;
+
+local SerializeL = {
+  formatIndex = formatIndex,
+  formatString = formatString,
+  serializeArgs = serializeArgs,
+  config = config
 }
 
--- What the fuck script ware
-if consolecreate then
-  consolecreate();
-end;
-
-__namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...) 
-  local method = getmethod();
-
-  if RBXMethods[method] and spyEnabled then
-    externprint(format("game:%s(%s)\n", method, Serialize.serializeArgs({...})))
-  end;
-
-  return __namecall(self, ...);
-end));
-
-setreadonly(httplib, false);
-
-httplib.request = function(request) 
-  local ResponseData = backupSYN(request); -- Emulate an actual syn.request call
-
-  if ResponseData.Headers["Content-Type"] == "application/json" then
-    local body = ResponseData.Body;
-    local ok, res = pcall(game.HttpService.JSONDecode, game.HttpService, body);
-
-    if ok then
-      ResponseData.Body = res;
-      ResponseData.RawBody = gsub(body, "%s", ""); 
-    end;
-  end;
-
-  externprint(format("%s.request(%s)\n\nResponse Data: %s\n", syn and "syn" or "http", Serialize(request), Serialize(ResponseData)));
-
-  return ResponseData;
-end;
-
-local WebsocketLib = syn and syn.websocket or WebSocket;
-local BackupWS = WebsocketLib and WebsocketLib.connect;
-
-if WebsocketLib then
-  WebsocketLib.connect = function(...) 
-    local WebSocket = BackupWS(...);
-    local mt = getrawmetatable(WebSocket);
-
-    externprint(format("%s.connect(%s)\n", syn and "syn.websocket" or "WebSocket", Serialize.serializeArgs({...})));
-    setreadonly(WebSocket, false);
-
-    local __send = WebSocket.Send;
-    local __close = WebSocket.Close;
-
-    mt.__newindex = function(self, idx, val) 
-      return rawset(self, idx, val);
-    end;
-
-    WebSocket.Send = function(self, message)
-      __send(self, message);
-      externprint(format("WebSocket:Send(%s)\n", Serialize.serializeArgs({message}))); 
-    end;
-
-    WebSocket.Close = function(self) 
-      __close(self);
-      externprint("WebSocket:Close()\n");
-    end;
-
-    WebSocket.OnMessage:Connect(function(message)
-      externprint(format("WebSocket Message Received: %s\n", Serialize.serializeArgs({message})));
-    end);
-
-    WebSocket.OnClose:Connect(function() 
-      externprint("WebSocket Closed");
-    end);
-
-    return WebSocket;
-  end;
-end;
-
-setreadonly(httplib, true);
-
-local HttpSpy = {};
-function HttpSpy:Destroy()
-  setreadonly(httplib, false);
-
-  getgenv().HttpSpy = nil;
-  httplib.request = backupSYN;
-  spyEnabled = false;
-
-  if WebsocketLib then
-    WebsocketLib.connect = BackupWS;
-  end;
-
-  setreadonly(httplib, true);
-end;
-
-getgenv().HttpSpy = HttpSpy;
-
-warn("HTTP(s) Spy; Created by dsf");
+return setmetatable(SerializeL, {
+  __call = function(self, ...)
+    return Serialize(...);
+  end
+});
